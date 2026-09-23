@@ -9,9 +9,11 @@ from backend.graph.storage import GraphStorage
 class GraphBuilder:
     """图谱构建器"""
 
-    def __init__(self):
+    def __init__(self, storage: "GraphStorage" = None):
         self.nlp_pipeline = NLPPipeline()
-        self.storage = GraphStorage()
+        # 允许注入共享的 storage，避免多个 GraphStorage 实例各自缓存、
+        # 写盘时互相覆盖导致数据丢失
+        self.storage = storage if storage is not None else GraphStorage()
 
     def build_from_text(self, text: str, doc_id: str = None) -> Dict:
         """从文本构建图谱"""

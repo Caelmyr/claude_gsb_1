@@ -22,8 +22,10 @@ CORS(app)
 
 # 初始化组件
 nlp_pipeline = NLPPipeline()
-graph_builder = GraphBuilder()
+# 全进程共享同一个存储实例（同一个内存缓存与锁），
+# 否则 GraphBuilder 与标注/统计接口各自持有缓存，写盘会互相覆盖
 graph_storage = GraphStorage()
+graph_builder = GraphBuilder(storage=graph_storage)
 graph_query = GraphQuery(graph_storage)
 answer_generator = AnswerGenerator(graph_storage)
 dialogue_manager = DialogueManager()
@@ -142,12 +144,17 @@ def parse_document(doc_id):
         return jsonify({'error': '文档文件不存在'}), 404
 
     # 构建图谱
-    result = graph_builder.build_from_document(filepath, doc_id)
+    try:
+        result = graph_builder.build_from_document(filepath, doc_id)
+    except Exception as e:
+        # 解析失败时明确返回错误，避免请求挂起导致前端一直显示加载动画
+        return jsonify({'error': f'文档解析失败: {str(e)}'}), 500
 
-    # 保存三元组
+    # 保存三元组（先写临时文件再原子替换，防止写一半被中断产生损坏文件）
     triples_path = os.path.join(TRIPLES_DIR, f'{doc_id}.json')
     os.makedirs(TRIPLES_DIR, exist_ok=True)
-    with open(triples_path, 'w', encoding='utf-8') as f:
+    tmp_path = f'{triples_path}.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
         json.dump({
             'doc_id': doc_id,
             'triples': result['triples'],
@@ -155,6 +162,7 @@ def parse_document(doc_id):
             'relations': result['relations'],
             'parse_time': datetime.now().isoformat()
         }, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, triples_path)
 
     return jsonify({
         'success': True,

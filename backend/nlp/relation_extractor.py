@@ -67,6 +67,9 @@ class RelationExtractor:
                         object_entity = self._find_matching_entity(obj, entities)
 
                         if subject_entity and object_entity:
+                            # 嵌套机构名容易被子串匹配成自己指向自己，跳过此类伪关系
+                            if subject_entity['text'] == object_entity['text']:
+                                continue
                             relation_key = (subject_entity['text'], relation_type, object_entity['text'])
                             if relation_key not in seen:
                                 seen.add(relation_key)
@@ -83,12 +86,20 @@ class RelationExtractor:
         return relations
 
     def _find_matching_entity(self, text: str, entities: List[Dict]) -> Dict:
-        """查找与文本匹配的实体"""
+        """查找与文本匹配的实体。
+
+        文本中可能同时包含短实体与其外层的长嵌套实体
+        （如“清华大学”与“清华大学计算机系人工智能实验室”），
+        选择与文本互相包含的实体中最长的一个，避免误匹配到父机构。
+        """
         text = text.strip()
-        for entity in entities:
-            if entity['text'] in text or text in entity['text']:
-                return entity
-        return None
+        candidates = [
+            entity for entity in entities
+            if entity['text'] in text or text in entity['text']
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda e: len(e['text']))
 
     def extract_triples(self, text: str, entities: List[Dict]) -> List[Tuple]:
         """抽取三元组 (主语, 谓语, 宾语)"""

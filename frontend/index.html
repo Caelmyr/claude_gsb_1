@@ -567,24 +567,32 @@
             loading.classList.add('active');
             result.innerHTML = '';
 
+            // 超时保护：复杂文档解析不应无限等待，避免一直显示加载动画
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 300000);
+
             try {
                 const response = await fetch(`${API_BASE}/api/documents/${docId}/parse`, {
-                    method: 'POST'
+                    method: 'POST',
+                    signal: controller.signal
                 });
 
                 const data = await response.json();
-
-                loading.classList.remove('active');
 
                 if (data.success) {
                     showParseResult(data);
                     loadStatistics();
                 } else {
-                    result.innerHTML = `<div style="color:#ff6b6b;">解析失败: ${data.error}</div>`;
+                    result.innerHTML = `<div style="color:#ff6b6b;">解析失败: ${data.error || '未知错误'}</div>`;
                 }
             } catch (error) {
+                const msg = error.name === 'AbortError'
+                    ? '解析超时，请检查文档内容或稍后重试'
+                    : error.message;
+                result.innerHTML = `<div style="color:#ff6b6b;">解析失败: ${msg}</div>`;
+            } finally {
+                clearTimeout(timeoutId);
                 loading.classList.remove('active');
-                result.innerHTML = `<div style="color:#ff6b6b;">解析失败: ${error.message}</div>`;
             }
         }
 
