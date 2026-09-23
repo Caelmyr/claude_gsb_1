@@ -20,10 +20,11 @@ from backend.qa.dialogue import DialogueManager
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
 CORS(app)
 
-# 初始化组件
-nlp_pipeline = NLPPipeline()
-graph_builder = GraphBuilder()
+# 初始化组件 - 所有组件共享同一个存储实例,
+# 保证解析写入的数据对查询/标注/问答立即可见, 且不会因多实例缓存不一致互相覆盖
 graph_storage = GraphStorage()
+nlp_pipeline = NLPPipeline()
+graph_builder = GraphBuilder(graph_storage)
 graph_query = GraphQuery(graph_storage)
 answer_generator = AnswerGenerator(graph_storage)
 dialogue_manager = DialogueManager()
@@ -144,10 +145,11 @@ def parse_document(doc_id):
     # 构建图谱
     result = graph_builder.build_from_document(filepath, doc_id)
 
-    # 保存三元组
+    # 保存三元组(原子写入, 防止写入中途进程被杀导致文件损坏)
     triples_path = os.path.join(TRIPLES_DIR, f'{doc_id}.json')
     os.makedirs(TRIPLES_DIR, exist_ok=True)
-    with open(triples_path, 'w', encoding='utf-8') as f:
+    tmp_path = triples_path + '.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
         json.dump({
             'doc_id': doc_id,
             'triples': result['triples'],
@@ -155,6 +157,9 @@ def parse_document(doc_id):
             'relations': result['relations'],
             'parse_time': datetime.now().isoformat()
         }, f, ensure_ascii=False, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, triples_path)
 
     return jsonify({
         'success': True,
